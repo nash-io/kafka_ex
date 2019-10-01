@@ -6,6 +6,8 @@ defmodule KafkaEx.Server0P10AndLater do
   alias KafkaEx.Protocol.CreateTopics
   alias KafkaEx.Protocol.DeleteTopics
   alias KafkaEx.Protocol.ApiVersions
+  alias KafkaEx.Protocol.SaslHandshake
+  alias KafkaEx.Protocol.SaslAuthenticate
   alias KafkaEx.Server0P8P2
   alias KafkaEx.Server0P9P0
 
@@ -98,6 +100,9 @@ defmodule KafkaEx.Server0P10AndLater do
        error_code: :no_error
      }, state} = kafka_api_versions(%State{brokers: brokers})
 
+    sasl_handshake(state)
+    sasl_authenticate(state)
+
     api_versions = KafkaEx.ApiVersions.api_versions_map(api_versions)
 
     {correlation_id, metadata} =
@@ -124,6 +129,9 @@ defmodule KafkaEx.Server0P10AndLater do
 
     # Get the initial "real" broker list and start a regular refresh cycle.
     state = update_metadata(state)
+
+    sasl_handshake(state)
+    sasl_authenticate(state)
 
     {:ok, _} =
       :timer.send_interval(state.metadata_update_interval, :update_metadata)
@@ -168,6 +176,23 @@ defmodule KafkaEx.Server0P10AndLater do
 
   def kafka_server_update_metadata(state) do
     {:noreply, update_metadata(state)}
+  end
+
+  def sasl_handshake(%{correlation_id: correlation_id} = state) do
+    SaslHandshake.create_request("PLAIN", correlation_id, @client_id)
+    |> first_broker_response(state)
+    |> SaslHandshake.parse_response()
+  end
+
+  def sasl_authenticate(%{correlation_id: correlation_id} = state) do
+    SaslAuthenticate.create_request(
+      "admin",
+      "admin-secret",
+      correlation_id,
+      @client_id
+    )
+    |> first_broker_response(state)
+    |> SaslAuthenticate.parse_response()
   end
 
   def kafka_api_versions(state) do
