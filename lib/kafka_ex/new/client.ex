@@ -446,15 +446,32 @@ defmodule KafkaEx.New.Client do
     end
   end
 
-  defp first_broker_response(request, brokers, timeout) do
-    Enum.find_value(brokers, fn broker ->
-      if Broker.connected?(broker) do
-        try_broker(broker, request, timeout)
-      end
-    end)
+  defp first_broker_response([], _state, _request, _timeout, _synchronous) do
+    {nil, {:error, :no_broker}}
   end
 
-  defp try_broker(broker, request, timeout) do
+  defp first_broker_response(
+         [broker | brokers],
+         state,
+         request,
+         timeout,
+         synchronous
+       ) do
+    if Broker.connected?(broker) do
+      {:ok, updated_broker} = authenticate_sasl_if_needed(broker, state)
+
+      {updated_broker,
+       try_broker(updated_broker, request, timeout, synchronous)}
+    else
+      first_broker_response(brokers, state, request, timeout, synchronous)
+    end
+  end
+
+  defp try_broker(broker, request, _timeout, false) do
+    NetworkClient.send_async_request(broker, request)
+  end
+
+  defp try_broker(broker, request, timeout, true) do
     case NetworkClient.send_sync_request(broker, request, timeout) do
       {:error, error} ->
         Logger.warn("Network call resulted in error: #{inspect(error)}")
@@ -463,6 +480,32 @@ defmodule KafkaEx.New.Client do
       response ->
         response
     end
+  end
+
+  defp authenticate_sasl_if_needed(
+         %Broker{sasl_authenticated: true} = broker,
+         _state
+       ) do
+    {:ok, broker}
+  end
+
+  defp authenticate_sasl_if_needed(
+         %Broker{sasl_authenticated: false} = broker,
+         %{use_sasl: false}
+       ) do
+    {:ok, broker}
+  end
+
+  defp authenticate_sasl_if_needed(
+         %Broker{sasl_authenticated: false} = broker,
+         %{sasl_options: sasl_options}
+       ) do
+    %{user: user, password: password} = sasl_options
+    request = Kayrock.SaslHandshake.get_request_struct(1)
+    request = %{request | mechanism: "PLAIN"}
+    request = Kayrock.Request.serialize(request)
+    try_broker(broker, request, 60_000, true)
+    {:ok, %{broker | sasl_authenticated: false}}
   end
 
   defp timeout_val(nil) do
@@ -495,7 +538,7 @@ defmodule KafkaEx.New.Client do
 
   defp get_api_versions(state, request_version \\ 0) do
     request = Kayrock.ApiVersions.get_request_struct(request_version)
-
+    
     {{ok_or_error, response}, state_out} =
       kayrock_network_request(request, NodeSelector.first_available(), state)
 
@@ -510,84 +553,69 @@ defmodule KafkaEx.New.Client do
        ) do
     # produce request have an acks field and if this is 0 then we do not want to
     # wait for a response from the broker
-    synchronous =
-      case Map.get(request, :acks) do
-        0 -> false
-        _ -> true
-      end
-
+    synchronous = Map.get(request, :acks) != 0
     network_timeout = config_sync_timeout(network_timeout)
 
-    {send_request, updated_state} =
-      get_send_request_function(
-        node_selector,
-        state,
-        network_timeout,
-        synchronous
-      )
+    {brokers, updated_state} = get_brokers(node_selector, state)
 
-    case send_request do
+    case brokers do
       :no_broker ->
         {{:error, :no_broker}, updated_state}
 
       _ ->
-        response =
-          run_client_request(
-            client_request(request, updated_state),
-            send_request,
+        client_request = client_request(request, updated_state)
+        wire_request = Kayrock.Request.serialize(client_request)
+
+        {updated_broker, result} =
+          first_broker_response(
+            brokers,
+            updated_state,
+            wire_request,
+            network_timeout,
             synchronous
           )
+
+        updated_state =
+          State.update_brokers(
+            updated_state,
+            fn %{node_id: node_id} = broker ->
+              if not is_nil(updated_broker) and
+                   updated_broker.node_id == node_id do
+                updated_broker
+              else
+                broker
+              end
+            end
+          )
+
+        response =
+          case result do
+            {:error, reason} ->
+              {:error, reason}
+
+            data ->
+              if synchronous do
+                {:ok, deserialize(data, client_request)}
+              else
+                data
+              end
+          end
 
         {response, State.increment_correlation_id(updated_state)}
     end
   end
 
-  defp run_client_request(
-         %{client_id: client_id, correlation_id: correlation_id} =
-           client_request,
-         send_request,
-         synchronous
-       )
-       when not is_nil(client_id) and not is_nil(correlation_id) do
-    wire_request = Kayrock.Request.serialize(client_request)
-
-    case(send_request.(wire_request)) do
-      {:error, reason} ->
-        {:error, reason}
-
-      data ->
-        if synchronous do
-          {:ok, deserialize(data, client_request)}
-        else
-          data
-        end
-    end
+  defp get_brokers(%NodeSelector{strategy: :first_available}, state) do
+    {State.brokers(state), state}
   end
 
-  defp get_send_request_function(
-         %NodeSelector{strategy: :first_available},
-         state,
-         network_timeout,
-         _synchronous
-       ) do
-    {fn wire_request ->
-       first_broker_response(
-         wire_request,
-         State.brokers(state),
-         network_timeout
-       )
-     end, state}
-  end
-
-  defp get_send_request_function(
+  defp get_brokers(
          %NodeSelector{
            strategy: :topic_partition,
            topic: topic,
            partition: partition
          },
-         state,
-         network_timeout,
-         synchronous
+         state
        ) do
     {broker, updated_state} =
       broker_for_partition_with_update(
@@ -597,32 +625,18 @@ defmodule KafkaEx.New.Client do
       )
 
     if broker do
-      if synchronous do
-        {fn wire_request ->
-           NetworkClient.send_sync_request(
-             broker,
-             wire_request,
-             network_timeout
-           )
-         end, updated_state}
-      else
-        {fn wire_request ->
-           NetworkClient.send_async_request(broker, wire_request)
-         end, updated_state}
-      end
+      {[broker], updated_state}
     else
       {:no_broker, updated_state}
     end
   end
 
-  defp get_send_request_function(
+  defp get_brokers(
          %NodeSelector{
            strategy: :consumer_group,
            consumer_group_name: consumer_group
          },
-         state,
-         network_timeout,
-         _synchronous
+         state
        ) do
     {broker, updated_state} =
       broker_for_consumer_group_with_update(
@@ -630,30 +644,15 @@ defmodule KafkaEx.New.Client do
         consumer_group
       )
 
-    {fn wire_request ->
-       NetworkClient.send_sync_request(
-         broker,
-         wire_request,
-         network_timeout
-       )
-     end, updated_state}
+    {[broker], updated_state}
   end
 
-  defp get_send_request_function(
+  defp get_brokers(
          %NodeSelector{} = node_selector,
-         state,
-         network_timeout,
-         _synchronous
+         state
        ) do
     {:ok, broker} = State.select_broker(state, node_selector)
-
-    {fn wire_request ->
-       NetworkClient.send_sync_request(
-         broker,
-         wire_request,
-         network_timeout
-       )
-     end, state}
+    {[broker], state}
   end
 
   defp deserialize(data, request) do

@@ -32,6 +32,14 @@ defmodule KafkaEx.Config do
   end
 
   @doc false
+  def use_sasl, do: Application.get_env(:kafka_ex, :use_sasl, false)
+
+  @doc false
+  def sasl_options do
+    sasl_options(use_sasl(), Application.get_env(:kafka_ex, :sasl_options, []))
+  end
+
+  @doc false
   def default_worker do
     :kafka_ex
   end
@@ -117,5 +125,26 @@ defmodule KafkaEx.Config do
           inspect(options)
       )
     end
+  end
+
+  defp sasl_options(false, _sasl_options), do: %{}
+  defp sasl_options(true, sasl_options) do
+    user = Keyword.get(sasl_options, :user)
+    password = Keyword.get(sasl_options, :password)
+    mechanism = Keyword.get(sasl_options, :mechanism)
+
+    if mechanism != :plain do
+      raise "Only Plain SASL authentication is supported"
+    end
+
+    if is_nil(user) do
+      raise "SASL user needs to be configured when use_sasl is true"
+    end
+
+    if is_nil(password) do
+      raise "SASL password needs to be configured when use_sasl is true"
+    end
+
+    %{user: user, password: password, mechanism: mechanism}
   end
 end

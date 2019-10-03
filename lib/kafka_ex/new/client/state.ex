@@ -15,6 +15,8 @@ defmodule KafkaEx.New.Client.State do
     worker_name: KafkaEx.Server,
     ssl_options: [],
     use_ssl: false,
+    sasl_options: %{},
+    use_sasl: false,
     api_versions: %{},
     allow_auto_topic_creation: true
   )
@@ -45,6 +47,8 @@ defmodule KafkaEx.New.Client.State do
         Keyword.get(args, :allow_auto_topic_creation, true),
       use_ssl: Keyword.get(args, :use_ssl, false),
       ssl_options: Keyword.get(args, :ssl_options, []),
+      use_sasl: Keyword.get(args, :use_sasl, false),
+      sasl_options: Keyword.get(args, :sasl_options, %{}),
       consumer_group_for_auto_commit: Keyword.get(args, :consumer_group)
     }
   end

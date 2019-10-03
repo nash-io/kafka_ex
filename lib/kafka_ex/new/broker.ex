@@ -10,7 +10,8 @@ defmodule KafkaEx.New.Broker do
             port: nil,
             socket: nil,
             rack: nil,
-            socket: nil
+            socket: nil,
+            sasl_authenticated: false
 
   @type t :: %__MODULE__{}
 
