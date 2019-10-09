@@ -14,9 +14,7 @@ config :kafka_ex,
   # server.properties file.
   # In the case below you would set "advertised.host.name=localhost"
   brokers: [
-    {"localhost", 9092},
-    {"localhost", 9093},
-    {"localhost", 9094}
+    {"kafka", 9092}
   ],
   #
   # OR:
@@ -56,11 +54,11 @@ config :kafka_ex,
   use_ssl: true,
   # see SSL OPTION DESCRIPTIONS - CLIENT SIDE at http://erlang.org/doc/man/ssl.html
   # for supported options
-  ssl_options: [
-    cacertfile: File.cwd!() <> "/ssl/ca-cert",
-    certfile: File.cwd!() <> "/ssl/cert.pem",
-    keyfile: File.cwd!() <> "/ssl/key.pem"
-  ],
+  # ssl_options: [
+  #  cacertfile: File.cwd!() <> "/ssl/ca-cert",
+  #  certfile: File.cwd!() <> "/ssl/cert.pem",
+  #  keyfile: File.cwd!() <> "/ssl/key.pem"
+  # ],
   # set this to the version of the kafka broker that you are using
   # include only major.minor.patch versions.  must be at least 0.8.0
   kafka_version: "0.10.1"

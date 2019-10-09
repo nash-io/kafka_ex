@@ -67,4 +67,33 @@ defmodule KafkaEx.Protocol.Common do
          |> Enum.reduce(&(&1 <> &2)))
     end
   end
+
+  def decode_string_array(<<element_count::32-signed, content::binary>>) do
+    decode_string_array(content, element_count, [])
+  end
+
+  defp decode_string_array(<<>>, 0, acc), do: acc
+
+  defp decode_string_array(remaining, n, acc) do
+    {string, remaining} = decode_string(remaining)
+    decode_string_array(remaining, n - 1, [string | acc])
+  end
+
+  def decode_string(<<-1::16-signed, remaining::binary>>) do
+    {nil, remaining}
+  end
+
+  def decode_string(
+        <<string_size::16-signed, string::size(string_size)-binary,
+          remaining::binary>>
+      ) do
+    {string, remaining}
+  end
+
+  def decode_bytes(
+        <<byte_size::32-signed, bytes::size(byte_size)-binary,
+          remaining::binary>>
+      ) do
+    {bytes, remaining}
+  end
 end
