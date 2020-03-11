@@ -261,8 +261,12 @@ defmodule KafkaEx.Server0P8P2 do
         {error, state_out}
 
       {response, state_out} ->
-        last_offset =
-          response |> hd |> Map.get(:partitions) |> hd |> Map.get(:last_offset)
+        last_offset = case response do
+          [%{partitions: [%{last_offset: last_offset}|_]}|_] -> last_offset
+          bad_response ->
+            Logger.error("stupid kafka_ex: #{inspect bad_response}")
+            raise "dramatic failure"
+        end
 
         if last_offset != nil && request.auto_commit do
           offset_commit_request = %OffsetCommit.Request{
