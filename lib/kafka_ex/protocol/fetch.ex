@@ -80,7 +80,7 @@ defmodule KafkaEx.Protocol.Fetch do
   def parse_response(
         <<_correlation_id::32-signed, topics_size::32-signed, rest::binary>>
       ) do
-    if topics_size == 0, do: Logger.error(“mega error: #{inspect rest}“)
+    if topics_size == 0, do: Logger.error("mega error: #{inspect rest}")
     parse_topics(topics_size, rest, __MODULE__)
   end
 
