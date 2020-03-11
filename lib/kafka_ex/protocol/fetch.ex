@@ -2,7 +2,7 @@ defmodule KafkaEx.Protocol.Fetch do
   alias KafkaEx.Protocol
   alias KafkaEx.Compression
   import KafkaEx.Protocol.Common
-  import Logger
+  require Logger
 
   @moduledoc """
   Implementation of the Kafka Fetch request and response APIs
