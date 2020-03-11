@@ -265,7 +265,7 @@ defmodule KafkaEx.Server0P8P2 do
           [%{partitions: [%{last_offset: last_offset}|_]}|_] -> last_offset
           bad_response ->
             Logger.log(:error, "stupid kafka_ex: #{inspect bad_response}")
-            raise "dramatic failure"
+            nil
         end
 
         if last_offset != nil && request.auto_commit do
